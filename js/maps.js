@@ -848,5 +848,41 @@ window.MAPS = [
         { id: "m_m631xtp", ref: "dredge", x: 884, y: 516 }
       ] }
     ]
+  },
+  {
+    id: "scryers",
+    name: "Scryer's Peak",
+    url: "maps/ScryersPeak.webp",
+    width: 2048,
+    height: 1024,
+    requiredCount: 180,
+    groups: []
+  },
+  {
+    id: "silken",
+    name: "Silken Hollow",
+    url: "maps/SilkenHollow.webp",
+    width: 2048,
+    height: 1024,
+    requiredCount: 168,
+    groups: []
+  },
+  {
+    id: "urrak",
+    name: "Urrak Markets",
+    url: "maps/UrrakMarkets.webp",
+    width: 2048,
+    height: 1024,
+    requiredCount: 160,
+    groups: []
+  },
+  {
+    id: "cithrel",
+    name: "Cithrel's Fall",
+    url: "maps/CithrelsFall.webp",
+    width: 2048,
+    height: 1024,
+    requiredCount: 188,
+    groups: []
   }
 ];

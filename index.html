@@ -13,7 +13,7 @@
 
   <link rel="stylesheet" href="css/styles.css" />
 </head>
-<body>
+<body data-mode="plan">
   <header id="toolbar">
     <span class="brand">🗺️ Route Planner</span>
 
@@ -33,7 +33,7 @@
     <button id="save-route" class="btn btn-primary">Save</button>
     <button id="export-route" class="btn" title="Export the current route as a shareable text string">Export</button>
     <button id="import-route" class="btn" title="Import a route from a text string">Import</button>
-    <button id="toggle-place" class="btn" title="Place/edit groups on the map">📍 Placement mode</button>
+    <a class="btn" href="map-editor.html" title="Create and edit maps">Map Editor</a>
 
     <span id="status" class="status"></span>
   </header>
@@ -54,47 +54,6 @@
           <p class="hint">
             Select a pull, then click groups on the map to add/remove them.
             Drag <span class="grip">⠿</span> to reorder.
-          </p>
-        </section>
-      </div>
-
-      <div id="placement-panel">
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Monster catalog</h2>
-            <button id="new-monster" class="btn btn-small">+ New monster</button>
-          </div>
-          <div class="place-actions">
-            <label class="field" style="flex:1">
-              Active monster
-              <select id="active-monster"></select>
-            </label>
-            <button id="edit-monster" class="btn btn-small" style="align-self:flex-end">Edit</button>
-          </div>
-          <p class="hint" style="margin-top:6px">
-            Pick a monster and a group, then <b>click the map</b> to drop it.
-            <b>Drag</b> a dot to move; <b>click a dot</b> to change/remove it.
-          </p>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
-            <h2>Groups</h2>
-            <button id="new-group" class="btn btn-small">+ New group</button>
-          </div>
-          <ul id="groups-list" class="pulls-list"><!-- rendered by app.js --></ul>
-        </section>
-
-        <section class="panel">
-          <div class="place-actions">
-            <button id="export-catalog" class="btn btn-primary btn-small">Export catalog</button>
-            <button id="export-groups" class="btn btn-primary btn-small">Export groups</button>
-            <button id="reset-draft" class="btn btn-small">Reset</button>
-          </div>
-          <p class="hint">
-            Edits autosave in this browser. Export <b>catalog</b> into
-            <code>js/monsters.js</code> and <b>groups</b> into <code>js/maps.js</code>
-            to make them permanent.
           </p>
         </section>
       </div>

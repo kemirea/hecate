@@ -36,5 +36,9 @@ window.MONSTERS = {
     { id: "enforcer", name: "Enforcer", count: 5 },
     { id: "enraged_earth_elemental", name: "Enraged Earth Elemental", count: 7 },
     { id: "quarry_stalker", name: "Quarry Stalker", count: 2 }
-  ]
+  ],
+  scryers: [],
+  silken: [],
+  urrak: [],
+  cithrel: []
 };

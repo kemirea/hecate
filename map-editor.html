@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Route Planner — Map Editor</title>
+
+  <!-- Leaflet (map rendering) — vendored locally, see vendor/ -->
+  <link rel="stylesheet" href="vendor/leaflet.css" />
+  <script src="vendor/leaflet.js"></script>
+  <!-- SortableJS — vendored locally -->
+  <script src="vendor/sortable.min.js"></script>
+
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body data-mode="place">
+  <header id="toolbar">
+    <span class="brand">🗺️ Map Editor</span>
+
+    <label class="field">
+      Map
+      <select id="map-select"></select>
+    </label>
+    <button id="map-rename" class="btn" title="Rename this map">✎</button>
+    <button id="map-delete" class="btn" title="Delete this map">🗑</button>
+    <button id="new-map" class="btn" title="Create a new map">+ New map</button>
+    <button id="save-map" class="btn btn-primary" title="Save this map's name and required count">Save</button>
+    <button id="export-map" class="btn" title="Export this map's data (meta + groups + catalog)">Export map</button>
+    <button id="import-map" class="btn" title="Import a map from Export map output">Import map</button>
+
+    <a class="btn" href="index.html" title="Back to the route planner">← Back to Route Planner</a>
+
+    <span id="status" class="status"></span>
+  </header>
+
+  <main id="layout">
+    <aside id="sidebar">
+      <section class="panel" id="map-settings-panel">
+        <div class="panel-head"><h2>Map settings</h2></div>
+        <div class="modal-field"><label>Required count</label><input id="map-required" type="number" min="0" step="1" /></div>
+        <div class="place-actions">
+          <label class="btn btn-small file-btn">Set image<input id="map-image" type="file" accept="image/*" hidden /></label>
+        </div>
+      </section>
+
+      <div id="placement-panel">
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Monster catalog</h2>
+            <button id="new-monster" class="btn btn-small">+ New monster</button>
+          </div>
+          <div class="place-actions">
+            <label class="field" style="flex:1">
+              Active monster
+              <select id="active-monster"></select>
+            </label>
+            <button id="edit-monster" class="btn btn-small" style="align-self:flex-end">Edit</button>
+          </div>
+          <p class="hint" style="margin-top:6px">
+            Pick a monster and a group, then <b>click the map</b> to drop it.
+            <b>Drag</b> a dot to move; <b>click a dot</b> to change/remove it.
+          </p>
+        </section>
+
+        <section class="panel" id="groups-section">
+          <div class="panel-head">
+            <h2>Groups</h2>
+            <button id="new-group" class="btn btn-small">+ New group</button>
+          </div>
+          <ul id="groups-list" class="pulls-list"><!-- rendered by app.js --></ul>
+        </section>
+
+        <section class="panel" style="margin-top: 16px;">
+          <div class="place-actions">
+            <button id="export-catalog" class="btn btn-primary btn-small">Export catalog</button>
+            <button id="export-groups" class="btn btn-primary btn-small">Export groups</button>
+            <button id="reset-draft" class="btn btn-small">Reset</button>
+          </div>
+        </section>
+      </div>
+    </aside>
+
+    <div id="map"></div>
+  </main>
+
+  <script src="js/monsters.js"></script>
+  <script src="js/maps.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

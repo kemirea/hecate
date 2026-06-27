@@ -17,6 +17,7 @@
   const LS_KEY = "routePlanner.routes.v1";
   const DRAFT_KEY = "routePlanner.groupDraft.v4.";
   const CATALOG_KEY = "routePlanner.monsterCatalog.v5.";
+  const MAPS_KEY = "routePlanner.mapsDraft.v1";   // user map edits/creations (meta only)
   const PALETTE = [
     "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
     "#008080", "#9a6324", "#e6ab02", "#46f0f0", "#f032e6",
@@ -52,7 +53,28 @@
   const clone = (o) => JSON.parse(JSON.stringify(o));
   const slug = (s) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 
-  function mapConfig(id) { return MAPS.find((m) => m.id === id); }
+  // ---- Maps list (committed maps.js + per-browser edits/creations) -----------
+  // mapsDraft (localStorage) holds map META only ({id,name,url,width,height,
+  // requiredCount}); group data still lives in the per-map group draft, seeded
+  // from the committed window.MAPS by id. Uploaded images are stored as data
+  // URLs in the meta's `url`, so the image is copied into the browser.
+  function metaOf(m) { return { id: m.id, name: m.name, url: m.url, width: m.width, height: m.height, requiredCount: m.requiredCount }; }
+  function loadMapsDraft() { try { return JSON.parse(localStorage.getItem(MAPS_KEY)) || {}; } catch (_) { return {}; } }
+  function saveMapsDraft(obj) { localStorage.setItem(MAPS_KEY, JSON.stringify(obj)); }
+  function committedGroups(id) { const m = MAPS.find((x) => x.id === id); return m && m.groups ? m.groups : []; }
+
+  // Effective maps list: committed maps with any draft overrides applied, plus
+  // user-created (custom) maps appended.
+  function mapsList() {
+    const d = loadMapsDraft();
+    const list = [];
+    MAPS.forEach((m) => { const o = d[m.id]; if (o && o.deleted) return; list.push(Object.assign(metaOf(m), o || {})); });
+    const known = new Set(MAPS.map((m) => m.id));
+    Object.keys(d).forEach((id) => { const o = d[id]; if (!known.has(id) && o && !o.deleted) list.push(o); });
+    return list;
+  }
+  function mapConfig(id) { return mapsList().find((m) => m.id === id) || mapsList()[0]; }
+
   function pullColor(i) { return PALETTE[i % PALETTE.length]; }
 
   // Both modes share one working dataset (the drafts), seeded from the files and
@@ -201,7 +223,7 @@
   // ---- Placement: drafts ----------------------------------------------------
   function ensureDraft() {
     if (draftMapId !== state.mapId || !draftGroups) {
-      draftGroups = loadDraft(state.mapId) || clone(mapCfg.groups);
+      draftGroups = loadDraft(state.mapId) || clone(committedGroups(state.mapId));
       draftMapId = state.mapId;
       renumberGroups();
       if (ensurePlacementIds(draftGroups)) saveDraft();
@@ -236,10 +258,11 @@
   function deleteMonsterDef(ref) {
     const d = draftCatalog.find((x) => x.id === ref);
     if (!d) return;
-    if (!confirm("Delete monster “" + d.name + "” from the catalog? Existing placements of it will show as unknown.")) return;
-    draftCatalog = draftCatalog.filter((x) => x.id !== ref);
-    if (state.activeMonsterRef === ref) state.activeMonsterRef = draftCatalog[0] ? draftCatalog[0].id : null;
-    saveCatalogDraft(); renderMonsterPicker(); buildMarkers(); renderAll();
+    confirmDialog("Delete monster “" + d.name + "” from the catalog? Existing placements of it will show as unknown.", function () {
+      draftCatalog = draftCatalog.filter((x) => x.id !== ref);
+      if (state.activeMonsterRef === ref) state.activeMonsterRef = draftCatalog[0] ? draftCatalog[0].id : null;
+      saveCatalogDraft(); renderMonsterPicker(); buildMarkers(); renderAll();
+    }, { title: "Delete monster", confirmLabel: "Delete", danger: true });
   }
 
   // ---- Placement: groups + placements ---------------------------------------
@@ -256,11 +279,17 @@
   function deleteDraftGroup(groupId) {
     const g = draftGroups.find((x) => x.id === groupId);
     if (!g) return;
-    if (g.monsters.length && !confirm("Delete group “" + g.name + "” and its " + g.monsters.length + " placement(s)?")) return;
-    draftGroups = draftGroups.filter((x) => x.id !== groupId);
-    renumberGroups();
-    if (state.activeGroupId === groupId) state.activeGroupId = draftGroups[0] ? draftGroups[0].id : null;
-    saveDraft(); buildMarkers(); renderAll();
+    const doDelete = function () {
+      draftGroups = draftGroups.filter((x) => x.id !== groupId);
+      renumberGroups();
+      if (state.activeGroupId === groupId) state.activeGroupId = draftGroups[0] ? draftGroups[0].id : null;
+      saveDraft(); buildMarkers(); renderAll();
+    };
+    if (g.monsters.length) {
+      confirmDialog("Delete group “" + g.name + "” and its " + g.monsters.length + " placement(s)?", doDelete, { title: "Delete group", confirmLabel: "Delete", danger: true });
+    } else {
+      doDelete();
+    }
   }
   function setActiveGroup(groupId) { state.activeGroupId = groupId; buildMarkers(); renderAll(); }
 
@@ -298,16 +327,114 @@
   }
 
   function resetDraft() {
-    if (!confirm("Discard placement edits (this map's groups AND the catalog) and reload from the files?")) return;
-    clearDraft(state.mapId); clearCatalogDraft(state.mapId);
-    draftGroups = clone(mapCfg.groups); draftMapId = state.mapId;
-    renumberGroups();
-    ensurePlacementIds(draftGroups);
-    draftCatalog = clone(catalogSeed(state.mapId)); draftCatalogMapId = state.mapId;
-    state.activeGroupId = draftGroups[0] ? draftGroups[0].id : null;
-    state.activeMonsterRef = draftCatalog[0] ? draftCatalog[0].id : null;
-    renderMonsterPicker(); buildMarkers(); renderAll();
-    setStatus("Reverted to files.");
+    confirmDialog("Discard placement edits (this map's groups AND the catalog) and reload from the files?", function () {
+      clearDraft(state.mapId); clearCatalogDraft(state.mapId);
+      draftGroups = clone(committedGroups(state.mapId)); draftMapId = state.mapId;
+      renumberGroups();
+      ensurePlacementIds(draftGroups);
+      draftCatalog = clone(catalogSeed(state.mapId)); draftCatalogMapId = state.mapId;
+      state.activeGroupId = draftGroups[0] ? draftGroups[0].id : null;
+      state.activeMonsterRef = draftCatalog[0] ? draftCatalog[0].id : null;
+      renderMonsterPicker(); buildMarkers(); renderAll();
+      setStatus("Reverted to files.");
+    }, { title: "Reset", confirmLabel: "Reset", danger: true });
+  }
+
+  // ---- Map editing (Map Editor page) ----------------------------------------
+  function renderMapSelect() {
+    const sel = $("#map-select");
+    if (!sel) return;
+    sel.innerHTML = "";
+    mapsList().forEach((m) => {
+      const opt = document.createElement("option");
+      opt.value = m.id; opt.textContent = m.name;
+      sel.appendChild(opt);
+    });
+    sel.value = state.mapId;
+  }
+
+  function renderMapPanel() {
+    const reqEl = $("#map-required");
+    if (reqEl) reqEl.value = mapCfg.requiredCount || 0;
+  }
+
+  function upsertMapDraft(fields) {
+    const d = loadMapsDraft();
+    d[state.mapId] = Object.assign({}, metaOf(mapConfig(state.mapId)), d[state.mapId], fields);
+    saveMapsDraft(d);
+  }
+
+  function newMap() {
+    const id = genId("map");
+    const d = loadMapsDraft();
+    d[id] = { id: id, name: "New map", url: "", width: 2048, height: 1024, requiredCount: 100 };
+    saveMapsDraft(d);
+    state.mapId = id;
+    renderMapSelect();
+    initMap();
+    renderMapPanel();
+    renderMonsterPicker();
+    renderAll();
+    setStatus("New map created — set an image and required count, then Save.");
+  }
+
+  function saveMap() {
+    let req = parseInt($("#map-required").value, 10);
+    if (!Number.isFinite(req) || req < 0) req = 0;
+    upsertMapDraft({ requiredCount: req });
+    mapCfg = mapConfig(state.mapId);
+    setStatus("Map saved.");
+  }
+
+  function renameMap() {
+    const cur = mapConfig(state.mapId);
+    promptDialog("Map name", cur.name || "", function (name) {
+      upsertMapDraft({ name: name.trim() || "Untitled Map" });
+      mapCfg = mapConfig(state.mapId);
+      renderMapSelect(); renderMapPanel();
+      setStatus("Map renamed.");
+    }, { title: "Rename map" });
+  }
+
+  function deleteMap() {
+    if (mapsList().length <= 1) { setStatus("Can't delete the only map."); return; }
+    const id = state.mapId;
+    const m = mapConfig(id);
+    confirmDialog("Delete map " + m.name + "?", function () {
+      const d = loadMapsDraft();
+      if (MAPS.some((x) => x.id === id)) d[id] = { id: id, deleted: true }; // hide a committed map locally
+      else delete d[id];                                                    // fully remove a browser-created map
+      saveMapsDraft(d);
+      clearDraft(id); clearCatalogDraft(id);
+      state.mapId = mapsList()[0].id;
+      draftMapId = null; draftCatalog = null; draftCatalogMapId = null;
+      renderMapSelect();
+      initMap();
+      if (state.mode === "place") { renderMonsterPicker(); renderMapPanel(); }
+      renderAll();
+      setStatus("Map deleted.");
+    }, { title: "Delete map", confirmLabel: "Delete", danger: true });
+  }
+
+  // Read an uploaded image file -> store as a data URL (copy in the browser) and
+  // adopt its pixel dimensions. Overwrites any existing image for this map.
+  function setMapImage(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onerror = () => setStatus("Couldn't read that file.");
+    reader.onload = () => {
+      const dataURL = reader.result;
+      const img = new Image();
+      img.onerror = () => setStatus("That file isn't a readable image.");
+      img.onload = () => {
+        upsertMapDraft({ url: dataURL, width: img.naturalWidth, height: img.naturalHeight });
+        initMap();
+        renderAll();
+        setStatus("Image set (" + img.naturalWidth + "×" + img.naturalHeight + ") and copied into your browser.");
+      };
+      img.src = dataURL;
+    };
+    reader.readAsDataURL(file);
   }
 
   // ---- Map setup ------------------------------------------------------------
@@ -318,7 +445,7 @@
 
     map = L.map("map", { crs: L.CRS.Simple, minZoom: -3, zoomSnap: 0.25, attributionControl: false });
     const bounds = [[0, 0], [mapCfg.height, mapCfg.width]];
-    L.imageOverlay(mapCfg.url, bounds).addTo(map);
+    if (mapCfg.url) L.imageOverlay(mapCfg.url, bounds).addTo(map);  // new maps may have no image yet
     map.fitBounds(bounds);
     map.setMaxBounds(L.latLngBounds(bounds).pad(0.4));
     overlayLayer = L.layerGroup().addTo(map);
@@ -694,6 +821,45 @@
     return { close };
   }
 
+  // Styled replacement for window.confirm — calls onConfirm() if confirmed.
+  function confirmDialog(message, onConfirm, opts) {
+    opts = opts || {};
+    const frag = document.createElement("div");
+    const h = document.createElement("h3"); h.textContent = opts.title || "Confirm";
+    const p = document.createElement("p"); p.className = "hint"; p.style.marginTop = "0"; p.textContent = message;
+    const actions = document.createElement("div"); actions.className = "modal-actions";
+    const cancel = document.createElement("button"); cancel.className = "btn"; cancel.textContent = "Cancel";
+    const ok = document.createElement("button"); ok.className = "btn " + (opts.danger ? "btn-danger" : "btn-primary"); ok.textContent = opts.confirmLabel || "OK";
+    actions.appendChild(cancel); actions.appendChild(ok);
+    frag.appendChild(h); frag.appendChild(p); frag.appendChild(actions);
+    const modal = makeModal(frag);
+    cancel.addEventListener("click", () => modal.close());
+    ok.addEventListener("click", () => { modal.close(); onConfirm(); });
+    ok.focus();
+  }
+
+  // Styled replacement for window.prompt — calls onSubmit(value) if confirmed.
+  function promptDialog(label, defaultValue, onSubmit, opts) {
+    opts = opts || {};
+    const frag = document.createElement("div");
+    const h = document.createElement("h3"); h.textContent = opts.title || "Edit";
+    const field = document.createElement("div"); field.className = "modal-field";
+    const lab = document.createElement("label"); lab.textContent = label;
+    const input = document.createElement("input"); input.type = "text"; input.value = defaultValue || "";
+    field.appendChild(lab); field.appendChild(input);
+    const actions = document.createElement("div"); actions.className = "modal-actions";
+    const cancel = document.createElement("button"); cancel.className = "btn"; cancel.textContent = "Cancel";
+    const ok = document.createElement("button"); ok.className = "btn btn-primary"; ok.textContent = opts.confirmLabel || "Save";
+    actions.appendChild(cancel); actions.appendChild(ok);
+    frag.appendChild(h); frag.appendChild(field); frag.appendChild(actions);
+    const modal = makeModal(frag);
+    cancel.addEventListener("click", () => modal.close());
+    function commit() { const v = input.value; modal.close(); onSubmit(v); }
+    ok.addEventListener("click", commit);
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") commit(); });
+    input.focus(); input.select();
+  }
+
   // Add (ref == null) or edit (ref given) a catalog monster.
   function openMonsterDefModal(ref) {
     const existing = ref ? draftCatalog.find((d) => d.id === ref) : null;
@@ -794,6 +960,79 @@
     }).join(",\n");
     return "groups: [\n" + groupStr + "\n    ]";
   }
+  // Full map definition (meta + groups) + its catalog entry. Image not included —
+  // a data-URL image becomes a placeholder "maps/<id>.webp" path to fill in.
+  function buildMapExport() {
+    const m = mapConfig(state.mapId);
+    const url = (m.url && m.url.indexOf("data:") === 0) ? ("maps/" + m.id + ".webp") : (m.url || ("maps/" + m.id + ".webp"));
+    const mapObj =
+      "  {\n" +
+      "    id: " + JSON.stringify(m.id) + ",\n" +
+      "    name: " + JSON.stringify(m.name) + ",\n" +
+      "    url: " + JSON.stringify(url) + ",\n" +
+      "    width: " + m.width + ",\n" +
+      "    height: " + m.height + ",\n" +
+      "    requiredCount: " + (m.requiredCount || 0) + ",\n" +
+      "    " + buildGroupsExport() + "\n" +
+      "  }";
+    return (
+      "// js/maps.js — add (or replace) this object in the window.MAPS array:\n" +
+      mapObj + "\n\n" +
+      "// js/monsters.js — add (or replace) this entry in the window.MONSTERS object:\n" +
+      buildCatalogExport()
+    );
+  }
+
+  // Parse the text produced by buildMapExport() back into { map, catalog }.
+  function parseMapExport(text) {
+    const clean = String(text || "").replace(/^[ \t]*\/\/.*$/gm, "").trim();
+    const start = clean.indexOf("{");
+    if (start < 0) throw new Error("no map object");
+    let depth = 0, end = -1;
+    for (let i = start; i < clean.length; i++) {
+      const c = clean[i];
+      if (c === "{") depth++;
+      else if (c === "}") { depth--; if (depth === 0) { end = i; break; } }
+    }
+    if (end < 0) throw new Error("unbalanced braces");
+    const mapText = clean.slice(start, end + 1);
+    const rest = clean.slice(end + 1).trim().replace(/^,/, "").trim();
+    // Evaluate as one object: { map: {...}, <mapId>: [...] }
+    const obj = new Function("return ({ map: " + mapText + (rest ? ", " + rest : "") + " })")();
+    const catKey = Object.keys(obj).find((k) => k !== "map");
+    return { map: obj.map, catalog: catKey ? obj[catKey] : [] };
+  }
+
+  // Import a map (meta + groups + catalog) into this browser's drafts.
+  function importMap(text) {
+    let parsed;
+    try { parsed = parseMapExport(text); } catch (e) { setStatus("Couldn't read that map data."); return false; }
+    const m = parsed.map;
+    if (!m || !m.id) { setStatus("Map data is missing an id."); return false; }
+    const id = m.id;
+    const d = loadMapsDraft();
+    d[id] = {
+      id: id,
+      name: m.name || "Imported Map",
+      url: m.url || "",
+      width: m.width || 2048,
+      height: m.height || 1024,
+      requiredCount: m.requiredCount || 0,
+    };
+    saveMapsDraft(d);
+    localStorage.setItem(DRAFT_KEY + id, JSON.stringify(Array.isArray(m.groups) ? m.groups : []));
+    localStorage.setItem(CATALOG_KEY + id, JSON.stringify(Array.isArray(parsed.catalog) ? parsed.catalog : []));
+
+    // Switch to it and force the in-memory drafts to reload from storage.
+    state.mapId = id;
+    draftMapId = null; draftCatalog = null; draftCatalogMapId = null;
+    renderMapSelect();
+    initMap();
+    if (state.mode === "place") { renderMonsterPicker(); renderMapPanel(); }
+    renderAll();
+    setStatus("Map “" + d[id].name + "” imported. Set an image for it if needed.");
+    return true;
+  }
 
   // Encode the current route to a single-line shareable string.
   function encodeRoute(route) {
@@ -893,18 +1132,41 @@
     ta.focus();
   }
 
-  function openExportModal(kind) {
-    const isCatalog = kind === "catalog";
+  function openMapImportModal() {
     const frag = document.createElement("div");
     frag.innerHTML =
-      "<h3>" + (isCatalog ? "Export monster catalog" : "Export groups for " + mapCfg.name) + "</h3>" +
-      '<p class="hint" style="margin-top:0">' +
-      (isCatalog
-        ? "Replace this map's <code>" + mapCfg.id + ": [...]</code> entry in <code>js/monsters.js</code> with the text below."
-        : "Replace the <code>groups: [...]</code> block for this map in <code>js/maps.js</code> with the text below.") +
-      "</p><textarea readonly></textarea>";
+      "<h3>Import map</h3>" +
+      '<p class="hint" style="margin-top:0">Paste the output of <b>Export map</b>. It adds (or overwrites) the map, its groups, and its catalog in this browser. The image isn\'t included — set one afterward with <b>Set image</b>.</p>' +
+      "<textarea placeholder=\"// js/maps.js — ...\"></textarea>";
     const ta = frag.querySelector("textarea");
-    ta.value = isCatalog ? buildCatalogExport() : buildGroupsExport();
+
+    const actions = document.createElement("div");
+    actions.className = "modal-actions";
+    const cancel = document.createElement("button");
+    cancel.className = "btn"; cancel.textContent = "Cancel";
+    const importBtn = document.createElement("button");
+    importBtn.className = "btn btn-primary"; importBtn.textContent = "Import";
+    const modal = makeModal(frag);
+    cancel.addEventListener("click", () => modal.close());
+    importBtn.addEventListener("click", () => { if (importMap(ta.value)) modal.close(); });
+    actions.appendChild(cancel); actions.appendChild(importBtn);
+    frag.appendChild(actions);
+    ta.focus();
+  }
+
+  function openExportModal(kind) {
+    const title = kind === "catalog" ? "Export monster catalog"
+      : kind === "map" ? "Export map “" + mapCfg.name + "”"
+      : "Export groups for " + mapCfg.name;
+    const instruction = kind === "map"
+      ? "Paste the map object into <code>window.MAPS</code> in <code>js/maps.js</code>, and the catalog entry into <code>window.MONSTERS</code> in <code>js/monsters.js</code>. The image isn't included — add the image file to <code>maps/</code> and point the map's <code>url</code> at it."
+      : "";
+    const frag = document.createElement("div");
+    frag.innerHTML = "<h3>" + title + "</h3>" +
+      (instruction ? '<p class="hint" style="margin-top:0">' + instruction + "</p>" : "") +
+      "<textarea readonly></textarea>";
+    const ta = frag.querySelector("textarea");
+    ta.value = kind === "catalog" ? buildCatalogExport() : kind === "map" ? buildMapExport() : buildGroupsExport();
 
     const actions = document.createElement("div");
     actions.className = "modal-actions";
@@ -924,84 +1186,97 @@
   }
 
   // ---- Mode switching -------------------------------------------------------
-  function setMode(mode) {
-    state.mode = mode;
-    document.body.classList.toggle("placement-mode", mode === "place");
-    if (mode === "place") { draftMapId = null; ensureDraft(); ensureCatalogDraft(); renderMonsterPicker(); }
-    buildMarkers();
-    renderAll();
-    setStatus(mode === "place" ? "Placement mode: pick a monster + group, then click the map." : "Route planning mode.");
-  }
-
   let statusTimer = null;
   function setStatus(msg) {
     const el = $("#status");
+    if (!el) return;
     el.textContent = msg;
     clearTimeout(statusTimer);
     statusTimer = setTimeout(() => { el.textContent = ""; }, 3000);
   }
 
   // ---- Wire up --------------------------------------------------------------
+  // Bind only if the element exists (the planner and placement pages each have
+  // a subset of these controls).
+  function on(id, evt, fn) { const el = $("#" + id); if (el) el.addEventListener(evt, fn); }
+
   function init() {
+    // The page declares which mode it runs in via <body data-mode="...">.
+    state.mode = document.body.dataset.mode === "place" ? "place" : "plan";
+    document.body.classList.toggle("placement-mode", state.mode === "place");
+
     const sel = $("#map-select");
-    MAPS.forEach((m) => {
-      const opt = document.createElement("option");
-      opt.value = m.id; opt.textContent = m.name;
-      sel.appendChild(opt);
+    if (sel) {
+      // Use the first available map if the default no longer exists.
+      if (!mapsList().some((m) => m.id === state.mapId)) state.mapId = mapsList()[0].id;
+      renderMapSelect();
+      sel.addEventListener("change", () => {
+        state.mapId = sel.value;
+        initMap();
+        if (state.mode === "plan") { newRoute(); renderSavedRoutes(); }
+        else { renderMonsterPicker(); renderMapPanel(); }
+        renderAll();
+      });
+    }
+
+    // Map-editing controls (Map Editor page)
+    on("new-map", "click", newMap);
+    on("map-rename", "click", renameMap);
+    on("map-delete", "click", deleteMap);
+    on("save-map", "click", saveMap);
+    on("export-map", "click", () => openExportModal("map"));
+    on("import-map", "click", openMapImportModal);
+    on("map-image", "change", (e) => { setMapImage(e.target.files[0]); e.target.value = ""; });
+
+    // Planner controls
+    on("add-pull", "click", addPull);
+    on("new-route", "click", newRoute);
+    on("save-route", "click", saveRoute);
+    on("export-route", "click", openRouteExportModal);
+    on("import-route", "click", openRouteImportModal);
+    on("saved-select", "change", (e) => { if (e.target.value) loadRoute(e.target.value); });
+    on("saved-rename", "click", () => {
+      const id = $("#saved-select").value;
+      if (!id) { setStatus("Select a saved route first."); return; }
+      const t0 = loadAllRoutes().find((x) => x.id === id);
+      if (!t0) return;
+      promptDialog("Route name", t0.name || "", (next) => {
+        const all = loadAllRoutes();
+        const t = all.find((x) => x.id === id);
+        if (!t) return;
+        t.name = next.trim() || "Untitled route";
+        saveAllRoutes(all);
+        if (state.route.id === id) state.route.name = t.name;
+        renderSavedRoutes();
+      }, { title: "Rename route" });
     });
-    sel.value = state.mapId;
-    sel.addEventListener("change", () => {
-      state.mapId = sel.value;
-      initMap();
-      if (state.mode === "plan") { newRoute(); renderSavedRoutes(); }
-      else renderMonsterPicker();
-      renderAll();
+    on("saved-delete", "click", () => {
+      const id = $("#saved-select").value;
+      if (!id) { setStatus("Select a saved route first."); return; }
+      const t = loadAllRoutes().find((x) => x.id === id);
+      if (!t) return;
+      confirmDialog("Delete “" + (t.name || "Untitled") + "”?", () => {
+        saveAllRoutes(loadAllRoutes().filter((x) => x.id !== id));
+        if (state.route.id === id) newRoute();
+        renderSavedRoutes();
+      }, { title: "Delete route", confirmLabel: "Delete", danger: true });
     });
 
-    $("#add-pull").addEventListener("click", addPull);
-    $("#new-route").addEventListener("click", newRoute);
-    $("#save-route").addEventListener("click", saveRoute);
-    $("#export-route").addEventListener("click", openRouteExportModal);
-    $("#import-route").addEventListener("click", openRouteImportModal);
-    $("#saved-select").addEventListener("change", (e) => { if (e.target.value) loadRoute(e.target.value); });
-    $("#saved-rename").addEventListener("click", () => {
-      const id = $("#saved-select").value;
-      if (!id) { setStatus("Select a saved route first."); return; }
-      const all = loadAllRoutes();
-      const t = all.find((x) => x.id === id);
-      if (!t) return;
-      const next = prompt("Rename route:", t.name || "");
-      if (next == null) return;
-      t.name = next.trim() || "Untitled route";
-      saveAllRoutes(all);
-      if (state.route.id === id) state.route.name = t.name;
-      renderSavedRoutes();
-    });
-    $("#saved-delete").addEventListener("click", () => {
-      const id = $("#saved-select").value;
-      if (!id) { setStatus("Select a saved route first."); return; }
-      const all = loadAllRoutes();
-      const t = all.find((x) => x.id === id);
-      if (!t) return;
-      if (!confirm("Delete “" + (t.name || "Untitled") + "”?")) return;
-      saveAllRoutes(all.filter((x) => x.id !== id));
-      if (state.route.id === id) newRoute();
-      renderSavedRoutes();
-    });
-    $("#toggle-place").addEventListener("click", () => setMode(state.mode === "place" ? "plan" : "place"));
-    $("#new-group").addEventListener("click", newDraftGroup);
-    $("#new-monster").addEventListener("click", () => openMonsterDefModal(null));
-    $("#edit-monster").addEventListener("click", () => { if (state.activeMonsterRef) openMonsterDefModal(state.activeMonsterRef); });
-    $("#active-monster").addEventListener("change", (e) => { state.activeMonsterRef = e.target.value; });
-    $("#export-catalog").addEventListener("click", () => openExportModal("catalog"));
-    $("#export-groups").addEventListener("click", () => openExportModal("groups"));
-    $("#reset-draft").addEventListener("click", resetDraft);
+    // Placement controls
+    on("new-group", "click", newDraftGroup);
+    on("new-monster", "click", () => openMonsterDefModal(null));
+    on("edit-monster", "click", () => { if (state.activeMonsterRef) openMonsterDefModal(state.activeMonsterRef); });
+    on("active-monster", "change", (e) => { state.activeMonsterRef = e.target.value; });
+    on("export-catalog", "click", () => openExportModal("catalog"));
+    on("export-groups", "click", () => openExportModal("groups"));
+    on("reset-draft", "click", resetDraft);
 
     state.route = freshRoute(state.mapId);
     state.activePullId = state.route.pulls[0].id;
     initMap();
+    if (state.mode === "place") { renderMonsterPicker(); renderMapPanel(); }
     renderAll();
-    renderSavedRoutes();
+    if (state.mode === "plan") renderSavedRoutes();
   }
 
   document.addEventListener("DOMContentLoaded", init);

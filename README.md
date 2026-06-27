@@ -52,10 +52,22 @@ server avoids browser quirks with local files.)
   one. The route's **total count/percentage** stays pinned at the top of the
   sidebar while the pull list scrolls.
 
-## Placement mode (building the catalog + placing monsters)
+## Map Editor (maps, catalog, and placing monsters)
 
-Click **📍 Placement mode** in the toolbar to manage monsters and place them
-without hand-editing coordinates:
+The map-authoring tool is a separate page (**`map-editor.html`**) — open it from
+the toolbar's **🗺️ Map Editor** link (and **← Back to planner** to return). It
+shares the same data with the planner via the browser, so edits show up in both.
+
+**Map settings:** **+ New map** creates a map; the **✎** / **🗑** icons next to
+the Map dropdown **rename** and **delete** the selected map. The **Map settings**
+panel sets the **required count** and **Set image** (upload a picture). The image
+is copied into your browser (stored as a data URL), so it keeps working even if
+the original file is moved or deleted, and replacing it overwrites the previous
+one. A new map adopts the uploaded image's pixel size. (Deleting a built-in map
+hides it locally; to remove it everywhere, drop it from `js/maps.js`.)
+
+Use the rest of the page to manage monsters and place them without hand-editing
+coordinates:
 
 - **Monster catalog:** **+ New monster** defines a monster (name + count point
   value); **Edit** changes the one chosen in the **Active monster** dropdown.
@@ -71,6 +83,11 @@ without hand-editing coordinates:
 - **Export catalog** → paste this map's `<mapId>: [...]` entry into
   `js/monsters.js`; **Export groups** → paste over that map's `groups` block in
   `js/maps.js`. **Reset** reverts both to the committed files.
+- **Export map** (in Map settings) → one block with the whole map: its `maps.js`
+  object (meta + groups) **and** its `monsters.js` catalog entry. The image is
+  not included — add the image file to `maps/` and point the map's `url` at it.
+- **Import map** → paste Export map output to add/overwrite that map (with its
+  groups + catalog) in this browser. The image isn't included; set one afterward.
 
 The files stay the single source of truth — placement drafts only affect the
 planner once you export and paste them in. Click 📍 again to return to route
@@ -79,7 +96,8 @@ planning.
 ## Files
 
 ```
-index.html        markup + script tags
+index.html        the route planner page
+map-editor.html    the Map Editor (map/catalog/placement authoring) page
 css/styles.css    styling
 js/monsters.js    per-map monster catalogs (window.MONSTERS, keyed by map id)
 js/maps.js        static map + group data; placements reference catalog ids

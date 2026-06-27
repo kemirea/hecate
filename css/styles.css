@@ -48,6 +48,7 @@ body {
 .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .btn-primary:hover { filter: brightness(1.05); }
 .btn-small { padding: 4px 9px; font-size: 12px; }
+.file-btn { display: inline-block; }
 
 /* ---- Layout ---- */
 #layout { flex: 1; display: flex; min-height: 0; }
@@ -174,7 +175,25 @@ body {
 /* ---- Placement mode ---- */
 #placement-panel { display: none; }
 body.placement-mode #plan-panels { display: none; }
-body.placement-mode #placement-panel { display: block; }
+/* On the Map Editor, drop the flex gap and use a divider under Map settings that
+   matches the planner's route-total divider (#sidebar-header). */
+body.placement-mode #sidebar { gap: 0; }
+#map-settings-panel { padding-bottom: 10px; margin-bottom: 2px; border-bottom: 1px solid var(--line); }
+
+/* Map Editor: keep everything fixed; only the groups list scrolls. */
+body.placement-mode #sidebar { overflow: hidden; }
+body.placement-mode #map-settings-panel { flex: none; }
+body.placement-mode #placement-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; margin-top: 12px; }
+body.placement-mode #placement-panel > section { flex: none; }
+/* more specific than the rule above so the groups section actually grows */
+body.placement-mode #placement-panel > #groups-section { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+body.placement-mode #groups-section #groups-list {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  /* break out of the sidebar's 12px padding so the scrollbar sits at the edge;
+     re-add padding inside so the rows stay aligned with the rest of the sidebar */
+  margin-left: -12px; margin-right: -12px;
+  padding-left: 12px; padding-right: 12px;
+}
 body.placement-mode #map { cursor: crosshair; }
 body.placement-mode #toggle-place { background: #d6336c; border-color: #d6336c; color: #fff; }
 .place-count { font-weight: 600; margin: 2px 0 10px; }
