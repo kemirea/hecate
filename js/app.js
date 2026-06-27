@@ -18,6 +18,7 @@
   const DRAFT_KEY = "routePlanner.groupDraft.v4.";
   const CATALOG_KEY = "routePlanner.monsterCatalog.v5.";
   const MAPS_KEY = "routePlanner.mapsDraft.v1";   // user map edits/creations (meta only)
+  const LASTROUTE_KEY = "routePlanner.lastRoute.v1"; // last-viewed route id per map
   const PALETTE = [
     "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
     "#008080", "#9a6324", "#e6ab02", "#46f0f0", "#f032e6",
@@ -121,6 +122,17 @@
   function loadAllRoutes() { try { return JSON.parse(localStorage.getItem(LS_KEY)) || []; } catch (_) { return []; } }
   function saveAllRoutes(arr) { localStorage.setItem(LS_KEY, JSON.stringify(arr)); }
 
+  // Remember the last route viewed per map, to reselect it when returning.
+  function loadLastRoutes() { try { return JSON.parse(localStorage.getItem(LASTROUTE_KEY)) || {}; } catch (_) { return {}; } }
+  function setLastRoute(mapId, routeId) { const o = loadLastRoutes(); o[mapId] = routeId; localStorage.setItem(LASTROUTE_KEY, JSON.stringify(o)); }
+  // Load the last-viewed route for the current map, or start a new one.
+  function loadLastOrNewRoute() {
+    const last = loadLastRoutes()[state.mapId];
+    const found = last && loadAllRoutes().find((r) => r.id === last && r.mapId === state.mapId);
+    if (found) loadRoute(found.id);
+    else newRoute();
+  }
+
   function loadDraft(mapId) { try { return JSON.parse(localStorage.getItem(DRAFT_KEY + mapId)); } catch (_) { return null; } }
   function saveDraft() { if (draftGroups) localStorage.setItem(DRAFT_KEY + state.mapId, JSON.stringify(draftGroups)); }
   function clearDraft(mapId) { localStorage.removeItem(DRAFT_KEY + mapId); }
@@ -153,11 +165,14 @@
     if (!state.route.pulls || state.route.pulls.length === 0) state.route.pulls = [freshPull()];
     if (!Array.isArray(state.route.chickenIds)) state.route.chickenIds = [];
     state.activePullId = state.route.pulls[0].id;
+    setLastRoute(state.mapId, state.route.id);
     renderAll();
     setStatus("Loaded “" + (state.route.name || "Untitled") + "”.");
   }
 
-  function saveRoute() {
+  // Auto-save: persist the working route into the saved-routes list on each edit.
+  function persistRoute() {
+    if (state.mode !== "plan") return;
     if (!state.route.name) state.route.name = "New Route";
     state.route.mapId = state.mapId;
     const now = Date.now();
@@ -167,8 +182,8 @@
     if (i >= 0) all[i] = clone(state.route);
     else { state.route.createdAt = now; all.push(clone(state.route)); }
     saveAllRoutes(all);
+    setLastRoute(state.mapId, state.route.id);
     renderSavedRoutes();
-    setStatus("Saved “" + state.route.name + "”.");
   }
 
   // ---- Pull editing ---------------------------------------------------------
@@ -176,17 +191,17 @@
     const p = freshPull();
     state.route.pulls.push(p);
     state.activePullId = p.id;
-    renderAll();
+    renderAll(); persistRoute();
   }
 
   function deletePull(pullId) {
     const pulls = state.route.pulls;
-    if (pulls.length <= 1) { pulls[0] = freshPull(); state.activePullId = pulls[0].id; renderAll(); return; }
+    if (pulls.length <= 1) { pulls[0] = freshPull(); state.activePullId = pulls[0].id; renderAll(); persistRoute(); return; }
     const idx = pulls.findIndex((p) => p.id === pullId);
     if (idx < 0) return;
     pulls.splice(idx, 1);
     if (state.activePullId === pullId) state.activePullId = pulls[Math.max(0, idx - 1)].id;
-    renderAll();
+    renderAll(); persistRoute();
   }
 
   function setActivePull(pullId) { state.activePullId = pullId; renderAll(); }
@@ -201,14 +216,14 @@
       if (owner >= 0) { const o = state.route.pulls[owner]; o.groupIds = o.groupIds.filter((id) => id !== groupId); }
       active.groupIds.push(groupId);
     }
-    renderAll();
+    renderAll(); persistRoute();
   }
 
   function removeGroup(pullId, groupId) {
     const p = state.route.pulls.find((x) => x.id === pullId);
     if (!p) return;
     p.groupIds = p.groupIds.filter((id) => id !== groupId);
-    renderAll();
+    renderAll(); persistRoute();
   }
 
   function toggleChicken(placementId) {
@@ -217,7 +232,7 @@
     if (i >= 0) state.route.chickenIds.splice(i, 1);
     else state.route.chickenIds.push(placementId);
     buildMarkers();
-    renderAll();
+    renderAll(); persistRoute();
   }
 
   // ---- Placement: drafts ----------------------------------------------------
@@ -378,12 +393,12 @@
     setStatus("New map created — set an image and required count, then Save.");
   }
 
-  function saveMap() {
+  // Auto-save the required-count field as it changes (no Save button).
+  function saveMapRequired() {
     let req = parseInt($("#map-required").value, 10);
     if (!Number.isFinite(req) || req < 0) req = 0;
     upsertMapDraft({ requiredCount: req });
     mapCfg = mapConfig(state.mapId);
-    setStatus("Map saved.");
   }
 
   function renameMap() {
@@ -684,7 +699,7 @@
       onEnd: () => {
         const order = Array.from(list.children).map((li) => li.dataset.pullId);
         state.route.pulls.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
-        renderAll();
+        renderAll(); persistRoute();
       },
     });
   }
@@ -705,18 +720,16 @@
     const sel = $("#saved-select");
     if (!sel) return;
     const routes = loadAllRoutes().filter((r) => r.mapId === state.mapId).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    // The current route is always an option (it may not be auto-saved yet).
+    if (state.route && !routes.some((r) => r.id === state.route.id)) routes.unshift(state.route);
     sel.innerHTML = "";
-    const ph = document.createElement("option");
-    ph.value = "";
-    ph.textContent = routes.length ? "— Load saved route —" : "— No saved routes —";
-    sel.appendChild(ph);
     routes.forEach((r) => {
       const o = document.createElement("option");
       o.value = r.id;
       o.textContent = (r.name || "Untitled route") + " (" + r.pulls.length + " pull" + (r.pulls.length === 1 ? "" : "s") + ")";
       sel.appendChild(o);
     });
-    sel.value = routes.some((r) => r.id === state.route.id) ? state.route.id : "";
+    if (state.route) sel.value = state.route.id;
   }
 
   // ---- Rendering: placement panel -------------------------------------------
@@ -1072,14 +1085,14 @@
 
     state.mode = "plan";
     document.body.classList.remove("placement-mode");
-    buildMarkers(); renderAll(); renderSavedRoutes();
+    buildMarkers(); renderAll(); persistRoute();
 
     const known = new Set(currentGroups().map((g) => g.id));
     const missing = new Set();
     state.route.pulls.forEach((pl) => pl.groupIds.forEach((id) => { if (!known.has(id)) missing.add(id); }));
     setStatus(missing.size
-      ? "Imported — " + missing.size + " unknown group(s) skipped. Save to keep it."
-      : "Route imported. Save to keep it.");
+      ? "Imported — " + missing.size + " unknown group(s) skipped."
+      : "Route imported.");
     return true;
   }
 
@@ -1114,7 +1127,7 @@
     const frag = document.createElement("div");
     frag.innerHTML =
       "<h3>Import route</h3>" +
-      '<p class="hint" style="margin-top:0">Paste a route string (starts with <code>RP1:</code>). It loads as a new route — Save to keep it.</p>' +
+      '<p class="hint" style="margin-top:0">Paste a route string (starts with <code>RP1:</code>). It loads as a new route.</p>' +
       '<textarea placeholder="RP1:..."></textarea>';
     const ta = frag.querySelector("textarea");
 
@@ -1213,9 +1226,8 @@
       sel.addEventListener("change", () => {
         state.mapId = sel.value;
         initMap();
-        if (state.mode === "plan") { newRoute(); renderSavedRoutes(); }
-        else { renderMonsterPicker(); renderMapPanel(); }
-        renderAll();
+        if (state.mode === "plan") { loadLastOrNewRoute(); renderSavedRoutes(); }
+        else { renderMonsterPicker(); renderMapPanel(); renderAll(); }
       });
     }
 
@@ -1223,7 +1235,7 @@
     on("new-map", "click", newMap);
     on("map-rename", "click", renameMap);
     on("map-delete", "click", deleteMap);
-    on("save-map", "click", saveMap);
+    on("map-required", "change", saveMapRequired);
     on("export-map", "click", () => openExportModal("map"));
     on("import-map", "click", openMapImportModal);
     on("map-image", "change", (e) => { setMapImage(e.target.files[0]); e.target.value = ""; });
@@ -1231,7 +1243,6 @@
     // Planner controls
     on("add-pull", "click", addPull);
     on("new-route", "click", newRoute);
-    on("save-route", "click", saveRoute);
     on("export-route", "click", openRouteExportModal);
     on("import-route", "click", openRouteImportModal);
     on("saved-select", "change", (e) => { if (e.target.value) loadRoute(e.target.value); });
@@ -1274,9 +1285,12 @@
     state.route = freshRoute(state.mapId);
     state.activePullId = state.route.pulls[0].id;
     initMap();
-    if (state.mode === "place") { renderMonsterPicker(); renderMapPanel(); }
-    renderAll();
-    if (state.mode === "plan") renderSavedRoutes();
+    if (state.mode === "place") {
+      renderMonsterPicker(); renderMapPanel(); renderAll();
+    } else {
+      loadLastOrNewRoute();   // restore the last-viewed route for this map, if any
+      renderSavedRoutes();
+    }
   }
 
   document.addEventListener("DOMContentLoaded", init);

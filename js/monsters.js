@@ -40,5 +40,18 @@ window.MONSTERS = {
   scryers: [],
   silken: [],
   urrak: [],
-  cithrel: []
+  cithrel: [
+    { id: "eldrin_recruit", name: "Eldrin Recruit", count: 1 },
+    { id: "ice_shardling", name: "Ice Shardling", count: 1 },
+    { id: "spellbound_golem", name: "Spellbound Golem", count: 5 },
+    { id: "eldrin_sentinel", name: "Eldrin Sentinel", count: 3 },
+    { id: "tundra_stalker", name: "Tundra Stalker", count: 2 },
+    { id: "blade_of_cithrel", name: "Blade of Cithrel", count: 3 },
+    { id: "frozen_remnant", name: "Frozen Remnant", count: 1 },
+    { id: "coldheart_assassin", name: "Coldheart Assassin", count: 3 },
+    { id: "eldrin_chronomancer", name: "Eldrin Chronomancer", count: 4 },
+    { id: "deceitful_scholar", name: "Deceitful Scholar", count: 5 },
+    { id: "greater_ice_elemental", name: "Greater Ice Elemental", count: 8 },
+    { id: "corrupter", name: "Corrupter", count: 5 }
+  ]
 };

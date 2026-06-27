@@ -15,7 +15,7 @@
 </head>
 <body data-mode="plan">
   <header id="toolbar">
-    <span class="brand">🗺️ Route Planner</span>
+    <span class="brand">🐈‍⬛ Route Planner</span>
 
     <label class="field">
       Map
@@ -30,7 +30,6 @@
     <button id="saved-delete" class="btn" title="Delete selected route">🗑</button>
 
     <button id="new-route" class="btn">New route</button>
-    <button id="save-route" class="btn btn-primary">Save</button>
     <button id="export-route" class="btn" title="Export the current route as a shareable text string">Export</button>
     <button id="import-route" class="btn" title="Import a route from a text string">Import</button>
     <a class="btn" href="map-editor.html" title="Create and edit maps">Map Editor</a>
@@ -45,7 +44,7 @@
           <div id="route-total" class="route-total"><!-- rendered by app.js --></div>
         </div>
 
-        <section class="panel">
+        <section class="panel" id="pulls-section">
           <div class="panel-head">
             <h2>Pulls</h2>
             <button id="add-pull" class="btn btn-small">+ Add pull</button>

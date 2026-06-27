@@ -33,8 +33,9 @@ server avoids browser quirks with local files.)
 
 - **Pick a map** from the toolbar dropdown.
 - **New route** creates a route named "New Route" with **one empty pull**
-  (selected). Save it, then load/switch routes via the **Route** dropdown in the
-  toolbar; use ✎ / 🗑 next to it to rename or delete the selected route.
+  (selected). Routes **auto-save** as you edit — load/switch them via the
+  **Route** dropdown in the toolbar; use ✎ / 🗑 next to it to rename or delete the
+  selected route.
 - **Click a group** on the map to add it to the selected pull. Click it again to
   remove it. Clicking a group that's in another pull **moves** it to the
   selected pull (each group is used at most once per route).
@@ -46,11 +47,11 @@ server avoids browser quirks with local files.)
   and number.
 - Click **Export** to get a single-line shareable text string for the current
   route (copy to clipboard from the dialog). **Import** opens a dialog to paste
-  such a string; it loads as a new route (switching maps if needed) — Save to keep it.
-- Click **Save** to store the current route. The toolbar **Route** dropdown
-  lists saved routes for the current map; ✎ renames and 🗑 deletes the selected
-  one. The route's **total count/percentage** stays pinned at the top of the
-  sidebar while the pull list scrolls.
+  such a string; it loads as a new route (switching maps if needed).
+- Edits **auto-save** continuously. The toolbar **Route** dropdown lists saved
+  routes for the current map; ✎ renames and 🗑 deletes the selected one. The
+  route's **total count/percentage** stays pinned at the top of the sidebar while
+  the pull list scrolls.
 
 ## Map Editor (maps, catalog, and placing monsters)
 
