@@ -117,6 +117,34 @@ body {
 .route-total .pct { color: var(--muted); }
 .route-total .bar { height: 6px; border-radius: 4px; background: #d6e2ff; margin-top: 7px; overflow: hidden; }
 .route-total .bar > span { display: block; height: 100%; background: var(--accent); }
+
+/* route modifier picker (sidebar header) */
+.modifier-bar { display: flex; align-items: center; gap: 6px; margin-top: 10px;
+  font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.modifier-bar select { flex: 1; font: inherit; font-size: 13px; text-transform: none; letter-spacing: 0;
+  padding: 5px 7px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--ink); }
+
+/* empowered (×3) and special-monster (Gorn/Eira) indicators */
+.grp-icon.emp-dot .grp-dot-assigned,
+.grp-icon.emp-dot .grp-free-dot,
+.grp-icon.emp-dot .grp-place-dot {
+  box-shadow: 0 0 0 3px #f5c518, 0 0 7px 2px rgba(245,197,24,.85);
+}
+/* crown badge on empowered monster dots */
+.grp-icon.emp-dot::after {
+  content: "👑"; position: absolute; top: -6px; right: -5px;
+  font-size: 12px; line-height: 1; filter: drop-shadow(0 1px 1px rgba(0,0,0,.7));
+}
+/* Gorn/Eira dots: 25% larger than regular dots (≈25px outer), light-blue outline */
+.grp-special-dot { width: 19px; height: 19px; margin: 0.5px; border-radius: 50%;
+  border: 3px solid #7fd4ff; box-shadow: 0 1px 4px rgba(0,0,0,.5); }
+.emp-tag { font-size: 12px; }
+
+/* map editor: modifier availability checkboxes + per-group remove toggles */
+.mod-check { display: flex; align-items: center; gap: 6px; font-size: 13px; margin: 4px 0; cursor: pointer; }
+.grp-rm { border: 1px solid var(--line); background: #fff; color: var(--muted); cursor: pointer;
+  font-size: 11px; font-weight: 700; width: 22px; border-radius: 5px; padding: 2px 0; }
+.grp-rm.on { background: #e11d48; border-color: #e11d48; color: #fff; }
 .pull-del {
   border: none; background: transparent; color: #b3b9c2; cursor: pointer;
   font-size: 16px; line-height: 1; padding: 2px 4px; border-radius: 5px;
@@ -237,6 +265,8 @@ body.placement-mode #toggle-place { background: #d6336c; border-color: #d6336c; 
   padding: 7px 10px; border-radius: 6px; cursor: pointer; font: inherit; color: var(--ink);
 }
 .context-item:hover { background: #f0f2f5; }
+.context-item-danger { color: #e11d48; }
+.context-item-danger:hover { background: #fdecef; }
 
 /* ---- Modal ---- */
 .modal-overlay {

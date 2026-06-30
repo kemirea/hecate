@@ -35,6 +35,7 @@
     activePullId: null,
     activeGroupId: null,      // placement mode
     activeMonsterRef: null,   // placement mode: which catalog monster to drop
+    tool: "place",            // map editor tool: "place" | "gorn" | "eira"
   };
 
   let map = null;
@@ -59,7 +60,7 @@
   // requiredCount}); group data still lives in the per-map group draft, seeded
   // from the committed window.MAPS by id. Uploaded images are stored as data
   // URLs in the meta's `url`, so the image is copied into the browser.
-  function metaOf(m) { return { id: m.id, name: m.name, url: m.url, width: m.width, height: m.height, requiredCount: m.requiredCount }; }
+  function metaOf(m) { return { id: m.id, name: m.name, url: m.url, width: m.width, height: m.height, requiredCount: m.requiredCount, modifiers: m.modifiers }; }
   function loadMapsDraft() { try { return JSON.parse(localStorage.getItem(MAPS_KEY)) || {}; } catch (_) { return {}; } }
   function saveMapsDraft(obj) { localStorage.setItem(MAPS_KEY, JSON.stringify(obj)); }
   function committedGroups(id) { const m = MAPS.find((x) => x.id === id); return m && m.groups ? m.groups : []; }
@@ -81,21 +82,66 @@
   // Both modes share one working dataset (the drafts), seeded from the files and
   // persisted to localStorage, so placement edits show up in the planner too.
   function currentGroups() { ensureDraft(); return draftGroups; }
-  function groupById(id) { return currentGroups().find((g) => g.id === id); }
+
+  // ---- Route modifiers ------------------------------------------------------
+  // Built-in special monsters added by the GORN/EIRA modifiers (fixed count 20).
+  const SPECIALS = { gorn: { name: "Gorn", count: 20 }, eira: { name: "Eira", count: 20 } };
+  function mapModifiers(mapId) {
+    const mod = (mapConfig(mapId) || {}).modifiers || {};
+    const e = mod.empowered || {}, g = mod.gorn || {}, ei = mod.eira || {};
+    return {
+      empowered: { available: !!e.available, ids: e.ids || [] },
+      gorn: { available: !!g.available, removes: g.removes || [], placements: g.placements || [] },
+      eira: { available: !!ei.available, removes: ei.removes || [], placements: ei.placements || [] },
+    };
+  }
+  // GORN/EIRA transform the visible groups: drop the `removes` groups and inject
+  // a synthetic "Gorn"/"Eira" group from the configured placements (plan mode).
+  function effectiveGroups() {
+    const groups = currentGroups();
+    const mod = state.route && state.route.modifier;
+    if (mod === "GORN" || mod === "EIRA") {
+      const ref = mod.toLowerCase();
+      const cfg = mapModifiers(state.mapId)[ref];
+      if (!cfg.available) return groups;
+      const removed = new Set(cfg.removes);
+      const kept = groups.filter((g) => !removed.has(g.id));
+      if (cfg.placements.length) {
+        kept.push({ id: "__" + ref + "__", name: SPECIALS[ref].name,
+          monsters: cfg.placements.map((pl) => ({ id: pl.id, ref: ref, x: pl.x, y: pl.y })) });
+      }
+      return kept;
+    }
+    return groups; // NONE / EMPOWERED leave the group set unchanged
+  }
+  // Groups to render/resolve in the current view (modifier applied in plan mode).
+  function activeGroups() { return state.mode === "plan" ? effectiveGroups() : currentGroups(); }
+  function groupById(id) { return activeGroups().find((g) => g.id === id); }
 
   function catalog() { ensureCatalogDraft(); return draftCatalog; }
   function defOf(ref) { return catalog().find((d) => d.id === ref); }
-  function placementName(p) { const d = defOf(p.ref); return d ? d.name : "(unknown)"; }
-  // A specific placement "chickened" in the current route counts 0 (plan mode
-  // only). Keyed by the placement's stable id so only that one dot is affected.
+  function placementName(p) {
+    if (SPECIALS[p.ref]) return SPECIALS[p.ref].name;
+    const d = defOf(p.ref); return d ? d.name : "(unknown)";
+  }
+  // A specific placement "chickened" in the current route counts 0 (plan mode only).
   function isChickenId(id) {
     return state.mode === "plan" && state.route && Array.isArray(state.route.chickenIds) &&
       state.route.chickenIds.includes(id);
   }
+  // Whether a placement id is marked empowered on the map (mode-agnostic).
+  function isEmpoweredId(id) { return mapModifiers(state.mapId).empowered.ids.indexOf(id) >= 0; }
+  // A placement is empowered when the map marks it so AND the route's modifier is EMPOWERED.
+  function isEmpowered(p) {
+    if (!(state.mode === "plan" && state.route && state.route.modifier === "EMPOWERED")) return false;
+    return mapModifiers(state.mapId).empowered.available && isEmpoweredId(p.id);
+  }
   function placementCount(p) {
-    if (isChickenId(p.id)) return 0;
-    const d = defOf(p.ref);
-    return d ? (d.count || 0) : 0;
+    if (isChickenId(p.id)) return 0;               // chicken wins over empowered
+    const def = SPECIALS[p.ref] || defOf(p.ref);
+    let base = def ? (def.count || 0) : 0;
+    if (isEmpowered(p)) base *= 3;
+    return base;
   }
 
   function activeIndex() { return state.route.pulls.findIndex((p) => p.id === state.activePullId); }
@@ -144,12 +190,12 @@
 
   // ---- Route lifecycle ------------------------------------------------------
   function freshPull() { return { id: genId("p"), groupIds: [] }; }
-  function freshRoute(mapId) { return { id: genId("r"), name: "New Route", mapId: mapId, pulls: [freshPull()], chickenIds: [] }; }
+  function freshRoute(mapId) { return { id: genId("r"), name: "New Route", mapId: mapId, pulls: [freshPull()], chickenIds: [], modifier: "NONE" }; }
 
   function newRoute() {
     state.route = freshRoute(state.mapId);
     state.activePullId = state.route.pulls[0].id;
-    if (state.mode === "plan") { renderAll(); renderSavedRoutes(); }
+    if (state.mode === "plan") { buildMarkers(); renderAll(); renderSavedRoutes(); }
     setStatus("New route started.");
   }
 
@@ -164,8 +210,10 @@
     }
     if (!state.route.pulls || state.route.pulls.length === 0) state.route.pulls = [freshPull()];
     if (!Array.isArray(state.route.chickenIds)) state.route.chickenIds = [];
+    if (!state.route.modifier) state.route.modifier = "NONE";
     state.activePullId = state.route.pulls[0].id;
     setLastRoute(state.mapId, state.route.id);
+    buildMarkers();   // rebuild dots for this route's modifier (effective groups)
     renderAll();
     setStatus("Loaded “" + (state.route.name || "Untitled") + "”.");
   }
@@ -308,6 +356,50 @@
   }
   function setActiveGroup(groupId) { state.activeGroupId = groupId; buildMarkers(); renderAll(); }
 
+  // ---- Map Editor: modifier config ------------------------------------------
+  // Read the current map's modifiers, mutate via fn, and persist.
+  function editMapModifiers(fn) {
+    const mods = mapModifiers(state.mapId);
+    fn(mods);
+    upsertMapDraft({ modifiers: mods });
+    mapCfg = mapConfig(state.mapId);
+  }
+  function toggleModifierAvailable(which) {
+    editMapModifiers((m) => { m[which].available = !m[which].available; });
+    if (state.tool === "gorn" && !mapModifiers(state.mapId).gorn.available) state.tool = "place";
+    if (state.tool === "eira" && !mapModifiers(state.mapId).eira.available) state.tool = "place";
+    renderModifiersPanel(); renderPlacementPanel(); buildMarkers();
+  }
+  function setTool(tool) { state.tool = tool; renderModifiersPanel(); setStatus(
+    tool === "gorn" ? "Click the map to place Gorn." : tool === "eira" ? "Click the map to place Eira." : "Placing monsters."); }
+
+  function toggleGroupRemoved(which, groupId) {
+    editMapModifiers((m) => {
+      const arr = m[which].removes, i = arr.indexOf(groupId);
+      if (i >= 0) arr.splice(i, 1); else arr.push(groupId);
+    });
+    renderPlacementPanel();
+  }
+  function togglePlacementEmpowered(placementId) {
+    editMapModifiers((m) => {
+      const arr = m.empowered.ids, i = arr.indexOf(placementId);
+      if (i >= 0) arr.splice(i, 1); else arr.push(placementId);
+    });
+    buildMarkers();
+  }
+
+  function addSpecialPlacement(ref, coords) {
+    editMapModifiers((m) => m[ref].placements.push({ id: genId("s"), x: Math.round(coords.x), y: Math.round(coords.y) }));
+    buildMarkers();
+  }
+  function moveSpecialPlacement(ref, plId, coords) {
+    editMapModifiers((m) => { const pl = m[ref].placements.find((x) => x.id === plId); if (pl) { pl.x = Math.round(coords.x); pl.y = Math.round(coords.y); } });
+  }
+  function removeSpecialPlacement(ref, plId) {
+    editMapModifiers((m) => { m[ref].placements = m[ref].placements.filter((x) => x.id !== plId); });
+    buildMarkers();
+  }
+
   function addPlacement(groupId, ref, coords) {
     const g = draftGroups.find((x) => x.id === groupId);
     if (!g) return;
@@ -320,12 +412,6 @@
     let changed = false;
     groups.forEach((g) => g.monsters.forEach((p) => { if (!p.id) { p.id = genId("m"); changed = true; } }));
     return changed;
-  }
-  function setPlacementRef(groupId, idx, ref) {
-    const g = draftGroups.find((x) => x.id === groupId);
-    if (!g || !g.monsters[idx]) return;
-    g.monsters[idx].ref = ref;
-    saveDraft(); buildMarkers(); renderAll();
   }
   function movePlacement(groupId, idx, coords) {
     const g = draftGroups.find((x) => x.id === groupId);
@@ -467,9 +553,11 @@
 
     map.on("click", (e) => {
       if (state.mode !== "place") return;
+      const coords = latLngToPixels(e.latlng);
+      if (state.tool === "gorn" || state.tool === "eira") { addSpecialPlacement(state.tool, coords); return; }
       if (!state.activeGroupId) { setStatus("Create or select a group first (+ New group)."); return; }
       if (!state.activeMonsterRef) { setStatus("Create or select a monster first (+ New monster)."); return; }
-      addPlacement(state.activeGroupId, state.activeMonsterRef, latLngToPixels(e.latlng));
+      addPlacement(state.activeGroupId, state.activeMonsterRef, coords);
     });
 
     buildMarkers();
@@ -485,7 +573,7 @@
     groupMarkers = {};
     const placing = state.mode === "place";
 
-    currentGroups().forEach((g) => {
+    activeGroups().forEach((g) => {
       groupMarkers[g.id] = [];
       const isActiveGroup = g.id === state.activeGroupId;
       g.monsters.forEach((p, idx) => {
@@ -496,9 +584,20 @@
         }).addTo(map);
 
         if (placing) {
-          marker.bindTooltip(g.name + " — " + placementName(p) + " (" + fmtNum(placementCount(p)) + ")", { direction: "top", offset: [0, -8] });
-          marker.on("click", () => openPlacementModal(g.id, idx));
+          const empTag = isEmpoweredId(p.id) ? " · empowered ×3" : "";
+          marker.bindTooltip(g.name + " — " + placementName(p) + " (" + fmtNum(defOf(p.ref) ? (defOf(p.ref).count || 0) : 0) + ")" + empTag + " · drag to move, right-click for options", { direction: "top", offset: [0, -8] });
           marker.on("dragend", (e) => movePlacement(g.id, idx, latLngToPixels(e.target.getLatLng())));
+          marker.on("contextmenu", (e) => {
+            if (e.originalEvent) e.originalEvent.preventDefault();
+            const items = [];
+            if (mapModifiers(state.mapId).empowered.available) {
+              const emp = isEmpoweredId(p.id);
+              items.push({ label: emp ? "Unmark Empowered" : "Mark Empowered", onClick: () => togglePlacementEmpowered(p.id) });
+            }
+            items.push({ label: "Delete", danger: true, onClick: () => deletePlacement(g.id, idx) });
+            showContextMenu(e.originalEvent.clientX, e.originalEvent.clientY, items);
+          });
+          if (isEmpoweredId(p.id)) { const el = marker.getElement(); if (el) el.classList.add("emp-dot"); }
         } else {
           marker.bindTooltip(
             "<b>" + placementName(p) + "</b> · " + g.name +
@@ -520,8 +619,34 @@
       });
     });
 
+    if (placing) renderSpecialPlacements();
     if (!placing) renderMapOverlays();
   }
+
+  // Map Editor: render Gorn/Eira placements (from the modifier config) as
+  // draggable special dots; click to remove.
+  function renderSpecialPlacements() {
+    ["gorn", "eira"].forEach((ref) => {
+      const cfg = mapModifiers(state.mapId)[ref];
+      if (!cfg.available) return;
+      const key = "__" + ref + "__";
+      groupMarkers[key] = [];
+      cfg.placements.forEach((pl) => {
+        const marker = L.marker(toLatLng(monsterPoint(pl)), { icon: specialIcon(), draggable: true, riseOnHover: true }).addTo(map);
+        marker.bindTooltip(SPECIALS[ref].name + " (×20) — click to remove", { direction: "top", offset: [0, -8] });
+        marker.on("click", () => removeSpecialPlacement(ref, pl.id));
+        marker.on("dragend", (e) => moveSpecialPlacement(ref, pl.id, latLngToPixels(e.target.getLatLng())));
+        groupMarkers[key].push(marker);
+      });
+    });
+  }
+  function specialRefOfGroup(gid) { return gid === "__gorn__" ? "gorn" : gid === "__eira__" ? "eira" : null; }
+  // The bigger, light-blue-outlined Gorn/Eira dot (used in both the editor and planner).
+  // White center by default; tinted with the pull color once added to a pull.
+  function specialDotIcon(fill) {
+    return L.divIcon({ className: "grp-icon", html: '<div class="grp-special-dot" style="background:' + (fill || "#fff") + '"></div>', iconSize: [26, 26], iconAnchor: [13, 13] });
+  }
+  function specialIcon() { return specialDotIcon("#fff"); }
 
   function freeIcon() { return L.divIcon({ className: "grp-icon", html: '<div class="grp-free-dot"></div>', iconSize: [24, 24], iconAnchor: [12, 12] }); }
   function placeIcon(active) {
@@ -602,7 +727,11 @@
     if (!overlayLayer) return;
     overlayLayer.clearLayers();
     const activeIdx = activeIndex();
-    Object.values(groupMarkers).forEach((arr) => arr.forEach((m) => { m.setIcon(freeIcon()); m.setZIndexOffset(0); }));
+    // Reset: Gorn/Eira keep their bigger light-blue dot; others go to the free dot.
+    Object.keys(groupMarkers).forEach((gid) => {
+      const sref = specialRefOfGroup(gid);
+      groupMarkers[gid].forEach((m) => { m.setIcon(sref ? specialDotIcon() : freeIcon()); m.setZIndexOffset(0); });
+    });
 
     state.route.pulls.forEach((pull, i) => {
       const color = pullColor(i);
@@ -614,17 +743,22 @@
           fillColor: color, fillOpacity: isActive ? 0.4 : 0.28, interactive: false,
         }).addTo(overlayLayer);
       }
-      pull.groupIds.forEach((gid) => { (groupMarkers[gid] || []).forEach((m) => m.setIcon(assignedDot(color, isActive))); });
+      pull.groupIds.forEach((gid) => {
+        const sref = specialRefOfGroup(gid);
+        (groupMarkers[gid] || []).forEach((m) => m.setIcon(sref ? specialDotIcon(color) : assignedDot(color, isActive)));
+      });
 
       const c = pullCentroid(pull);
       if (c) pullNumberMarker(c, i + 1, color).addTo(overlayLayer);
     });
 
-    // Chickened monsters override their dot with a 🐔, regardless of pull.
-    currentGroups().forEach((g) => {
+    // Chickened monsters become a 🐔 (wins); empowered (×3) get a gold ring.
+    activeGroups().forEach((g) => {
       const ms = groupMarkers[g.id] || [];
       g.monsters.forEach((p, idx) => {
-        if (isChickenId(p.id) && ms[idx]) { ms[idx].setIcon(chickenIcon()); ms[idx].setZIndexOffset(100000); }
+        if (!ms[idx]) return;
+        if (isChickenId(p.id)) { ms[idx].setIcon(chickenIcon()); ms[idx].setZIndexOffset(100000); return; }
+        if (isEmpowered(p)) { const el = ms[idx].getElement(); if (el) el.classList.add("emp-dot"); }
       });
     });
 
@@ -672,20 +806,24 @@
         const g = groupById(gid);
         if (!g) return;
         g.monsters.forEach((p) => {
-          const t = tally.get(p.ref) || { qty: 0, chick: 0 };
+          const t = tally.get(p.ref) || { qty: 0, chick: 0, emp: 0 };
           t.qty++;
           if (isChickenId(p.id)) t.chick++;
+          else if (isEmpowered(p)) t.emp++;
           tally.set(p.ref, t);
         });
       });
       tally.forEach((t, ref) => {
-        const d = defOf(ref);
+        const name = SPECIALS[ref] ? SPECIALS[ref].name : (defOf(ref) ? defOf(ref).name : "(unknown)");
         const m = document.createElement("li");
         m.className = "pull-member";
         const chickTag = t.chick > 0
           ? ' <span class="chicken-tag" title="' + t.chick + ' chickened">🐔' + (t.chick > 1 ? t.chick : "") + "</span>"
           : "";
-        m.innerHTML = '<span style="flex:1">' + (d ? d.name : "(unknown)") + chickTag +
+        const empTag = t.emp > 0
+          ? ' <span class="emp-tag" title="' + t.emp + ' empowered (×3)">👑' + (t.emp > 1 ? t.emp : "") + "</span>"
+          : "";
+        m.innerHTML = '<span style="flex:1">' + name + chickTag + empTag +
           '</span> <span class="mon">×' + t.qty + "</span>";
         members.appendChild(m);
       });
@@ -714,6 +852,30 @@
       "<b>" + fmtNum(c) + "</b> / " + fmtNum(requiredCount()) +
       ' <span class="pct">(' + fmtNum(p) + "%)</span>" +
       '<div class="bar"><span style="width:' + barW + '%"></span></div>';
+  }
+
+  // The route's modifier picker — only shows modifiers the current map allows.
+  function renderModifierSelect() {
+    const sel = $("#route-modifier"), bar = $("#modifier-bar");
+    if (!sel || !bar) return;
+    const mods = mapModifiers(state.mapId);
+    const opts = [["NONE", "No modifier"]];
+    if (mods.empowered.available) opts.push(["EMPOWERED", "Empowered"]);
+    if (mods.gorn.available) opts.push(["GORN", "Gorn"]);
+    if (mods.eira.available) opts.push(["EIRA", "Eira"]);
+    bar.style.display = opts.length > 1 ? "" : "none";
+    sel.innerHTML = "";
+    opts.forEach((o) => { const opt = document.createElement("option"); opt.value = o[0]; opt.textContent = o[1]; sel.appendChild(opt); });
+    const cur = (state.route && state.route.modifier) || "NONE";
+    sel.value = opts.some((o) => o[0] === cur) ? cur : "NONE";
+  }
+
+  function setRouteModifier(value) {
+    if (!state.route) return;
+    state.route.modifier = value;
+    buildMarkers();   // effective groups change → rebuild dots
+    renderAll();
+    persistRoute();
   }
 
   function renderSavedRoutes() {
@@ -761,6 +923,19 @@
         '<span class="pull-title">' + g.name +
         ' <span class="pull-count">(' + g.monsters.length + " monster" + (g.monsters.length === 1 ? "" : "s") + ")</span></span>";
 
+      const mods = mapModifiers(state.mapId);
+      const addRemoveToggle = (which, label) => {
+        const b = document.createElement("button");
+        const on = mods[which].removes.indexOf(g.id) >= 0;
+        b.className = "grp-rm" + (on ? " on" : "");
+        b.textContent = label;
+        b.title = (on ? "Currently removed" : "Remove this group") + " when " + (which === "gorn" ? "Gorn" : "Eira") + " is active";
+        b.addEventListener("click", (e) => { e.stopPropagation(); toggleGroupRemoved(which, g.id); });
+        row.appendChild(b);
+      };
+      if (mods.gorn.available) addRemoveToggle("gorn", "G");
+      if (mods.eira.available) addRemoveToggle("eira", "E");
+
       const del = document.createElement("button");
       del.className = "pull-del"; del.textContent = "✕"; del.title = "Delete group";
       del.addEventListener("click", (e) => { e.stopPropagation(); deleteDraftGroup(g.id); });
@@ -772,7 +947,8 @@
       g.monsters.forEach((p, idx) => {
         const m = document.createElement("li");
         m.className = "pull-member";
-        m.innerHTML = "<span>" + placementName(p) + '</span> <span class="mon">(' + fmtNum(placementCount(p)) +
+        const empTag = isEmpoweredId(p.id) ? ' <span class="emp-tag" title="empowered ×3">👑</span>' : "";
+        m.innerHTML = "<span>" + placementName(p) + empTag + '</span> <span class="mon">(' + fmtNum(placementCount(p)) +
           " pts) · (" + Math.round(p.x) + ", " + Math.round(p.y) + ")</span>";
         const x = document.createElement("button");
         x.className = "member-del"; x.textContent = "✕"; x.title = "Delete placement";
@@ -785,13 +961,53 @@
     });
   }
 
+  // Map Editor: modifier availability checkboxes + Gorn/Eira placement tools.
+  function renderModifiersPanel() {
+    const host = $("#modifiers-panel");
+    if (!host) return;
+    const mods = mapModifiers(state.mapId);
+    host.innerHTML = "";
+    const head = document.createElement("div"); head.className = "panel-head";
+    head.innerHTML = "<h2>Modifiers</h2>";
+    host.appendChild(head);
+
+    [["empowered", "Empowered"], ["gorn", "Gorn"], ["eira", "Eira"]].forEach((kv) => {
+      const row = document.createElement("label"); row.className = "mod-check";
+      const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = mods[kv[0]].available;
+      cb.addEventListener("change", () => toggleModifierAvailable(kv[0]));
+      row.appendChild(cb); row.appendChild(document.createTextNode(" " + kv[1] + " available"));
+      host.appendChild(row);
+    });
+
+    if (mods.gorn.available || mods.eira.available) {
+      const tools = document.createElement("div"); tools.className = "place-actions";
+      const mk = (tool, label) => {
+        const b = document.createElement("button");
+        b.className = "btn btn-small" + (state.tool === tool ? " btn-primary" : "");
+        b.textContent = label;
+        b.addEventListener("click", () => setTool(tool));
+        return b;
+      };
+      tools.appendChild(mk("place", "Place monsters"));
+      if (mods.gorn.available) tools.appendChild(mk("gorn", "Place Gorn"));
+      if (mods.eira.available) tools.appendChild(mk("eira", "Place Eira"));
+      host.appendChild(tools);
+    }
+
+    const hint = document.createElement("p"); hint.className = "hint";
+    hint.innerHTML = "Per-group <b>G</b>/<b>E</b> toggles below mark groups removed under Gorn/Eira. Mark a monster <b>empowered</b> from its dot's edit dialog.";
+    host.appendChild(hint);
+  }
+
   function renderAll() {
     if (state.mode === "place") {
       if (overlayLayer) overlayLayer.clearLayers();
+      renderModifiersPanel();
       renderPlacementPanel();
     } else {
       renderPullsList();
       renderRouteTotal();
+      renderModifierSelect();
       renderMapOverlays();
     }
   }
@@ -808,7 +1024,7 @@
     menu.className = "context-menu";
     items.forEach((it) => {
       const b = document.createElement("button");
-      b.className = "context-item";
+      b.className = "context-item" + (it.danger ? " context-item-danger" : "");
       b.textContent = it.label;
       b.addEventListener("click", () => { closeContextMenu(); it.onClick(); });
       menu.appendChild(b);
@@ -917,43 +1133,6 @@
     frag.addEventListener("keydown", (e) => { if (e.key === "Enter") commit(); });
   }
 
-  // Edit which monster a placement is, or delete the placement.
-  function openPlacementModal(groupId, idx) {
-    const g = draftGroups.find((x) => x.id === groupId);
-    if (!g || !g.monsters[idx]) return;
-    const placement = g.monsters[idx];
-
-    const frag = document.createElement("div");
-    frag.innerHTML =
-      "<h3>Placement in " + g.name + "</h3>" +
-      '<div class="modal-field"><label>Monster</label><select id="p-ref"></select></div>';
-    const sel = frag.querySelector("#p-ref");
-    draftCatalog.forEach((d) => {
-      const opt = document.createElement("option");
-      opt.value = d.id; opt.textContent = d.name + " (" + fmtNum(d.count || 0) + ")";
-      sel.appendChild(opt);
-    });
-    sel.value = placement.ref;
-
-    const actions = document.createElement("div");
-    actions.className = "modal-actions";
-    const delBtn = document.createElement("button");
-    delBtn.className = "btn btn-danger"; delBtn.textContent = "Delete";
-    delBtn.addEventListener("click", () => { modal.close(); deletePlacement(groupId, idx); });
-    const cancel = document.createElement("button");
-    cancel.className = "btn"; cancel.textContent = "Cancel";
-    cancel.addEventListener("click", () => modal.close());
-    const save = document.createElement("button");
-    save.className = "btn btn-primary"; save.textContent = "Save";
-    save.addEventListener("click", () => { modal.close(); setPlacementRef(groupId, idx, sel.value); });
-    actions.appendChild(delBtn);
-    actions.appendChild(document.createElement("div")).className = "spacer";
-    actions.appendChild(cancel); actions.appendChild(save);
-    frag.appendChild(actions);
-
-    const modal = makeModal(frag);
-  }
-
   function buildCatalogExport() {
     const lines = draftCatalog.map((d) =>
       "    { id: " + JSON.stringify(d.id) + ", name: " + JSON.stringify(d.name) + ", count: " + (d.count || 0) + " }"
@@ -978,6 +1157,11 @@
   function buildMapExport() {
     const m = mapConfig(state.mapId);
     const url = (m.url && m.url.indexOf("data:") === 0) ? ("maps/" + m.id + ".webp") : (m.url || ("maps/" + m.id + ".webp"));
+    const mods = mapModifiers(m.id);
+    const hasMods = mods.empowered.available || mods.gorn.available || mods.eira.available ||
+      mods.empowered.ids.length || mods.gorn.removes.length || mods.gorn.placements.length ||
+      mods.eira.removes.length || mods.eira.placements.length;
+    const modsLine = hasMods ? "    modifiers: " + JSON.stringify(mods) + ",\n" : "";
     const mapObj =
       "  {\n" +
       "    id: " + JSON.stringify(m.id) + ",\n" +
@@ -986,6 +1170,7 @@
       "    width: " + m.width + ",\n" +
       "    height: " + m.height + ",\n" +
       "    requiredCount: " + (m.requiredCount || 0) + ",\n" +
+      modsLine +
       "    " + buildGroupsExport() + "\n" +
       "  }";
     return (
@@ -1031,6 +1216,7 @@
       width: m.width || 2048,
       height: m.height || 1024,
       requiredCount: m.requiredCount || 0,
+      modifiers: m.modifiers || undefined,
     };
     saveMapsDraft(d);
     localStorage.setItem(DRAFT_KEY + id, JSON.stringify(Array.isArray(m.groups) ? m.groups : []));
@@ -1047,25 +1233,27 @@
     return true;
   }
 
-  // Encode the current route to a single-line shareable string.
+  // Encode the current route to a single-line shareable string (RP2 adds modifier).
   function encodeRoute(route) {
     const payload = {
-      v: 1,
+      v: 2,
       m: route.mapId,
       n: route.name || "",
       p: route.pulls.map((pl) => pl.groupIds),
       c: route.chickenIds || [],
+      x: route.modifier || "NONE",
     };
-    return "RP1:" + btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+    return "RP2:" + btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
   }
 
-  // Decode an "RP1:" string and load it as a new (unsaved) route.
+  // Decode an "RP1:"/"RP2:" string and load it as a new (unsaved) route.
   function importRoute(str) {
     str = (str || "").trim();
     let payload;
     try {
-      if (str.indexOf("RP1:") !== 0) throw new Error("prefix");
-      payload = JSON.parse(decodeURIComponent(escape(atob(str.slice(4)))));
+      const m = /^RP[12]:/.exec(str);
+      if (!m) throw new Error("prefix");
+      payload = JSON.parse(decodeURIComponent(escape(atob(str.slice(m[0].length)))));
     } catch (e) { setStatus("That doesn't look like a valid route string."); return false; }
     if (!payload || !mapConfig(payload.m)) { setStatus("Route is for an unknown map."); return false; }
 
@@ -1080,6 +1268,7 @@
       mapId: payload.m,
       pulls: pulls,
       chickenIds: Array.isArray(payload.c) ? payload.c.slice() : [],
+      modifier: payload.x || "NONE",
     };
     state.activePullId = state.route.pulls[0].id;
 
@@ -1087,7 +1276,7 @@
     document.body.classList.remove("placement-mode");
     buildMarkers(); renderAll(); persistRoute();
 
-    const known = new Set(currentGroups().map((g) => g.id));
+    const known = new Set(activeGroups().map((g) => g.id));
     const missing = new Set();
     state.route.pulls.forEach((pl) => pl.groupIds.forEach((id) => { if (!known.has(id)) missing.add(id); }));
     setStatus(missing.size
@@ -1227,7 +1416,7 @@
         state.mapId = sel.value;
         initMap();
         if (state.mode === "plan") { loadLastOrNewRoute(); renderSavedRoutes(); }
-        else { renderMonsterPicker(); renderMapPanel(); renderAll(); }
+        else { state.tool = "place"; renderMonsterPicker(); renderMapPanel(); renderAll(); }
       });
     }
 
@@ -1243,6 +1432,7 @@
     // Planner controls
     on("add-pull", "click", addPull);
     on("new-route", "click", newRoute);
+    on("route-modifier", "change", (e) => setRouteModifier(e.target.value));
     on("export-route", "click", openRouteExportModal);
     on("import-route", "click", openRouteImportModal);
     on("saved-select", "change", (e) => { if (e.target.value) loadRoute(e.target.value); });

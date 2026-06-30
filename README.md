@@ -52,6 +52,10 @@ server avoids browser quirks with local files.)
   routes for the current map; ✎ renames and 🗑 deletes the selected one. The
   route's **total count/percentage** stays pinned at the top of the sidebar while
   the pull list scrolls.
+- **Modifiers:** if the map allows them, a **Modifier** picker in the sidebar
+  header offers `Empowered` (map-marked monsters count ×3), `Gorn`, or `Eira`
+  (remove certain groups and add Gorn/Eira — each worth 20). The choice is part
+  of the route and updates the map live. Chicken still wins over Empowered.
 
 ## Map Editor (maps, catalog, and placing monsters)
 
@@ -66,6 +70,12 @@ is copied into your browser (stored as a data URL), so it keeps working even if
 the original file is moved or deleted, and replacing it overwrites the previous
 one. A new map adopts the uploaded image's pixel size. (Deleting a built-in map
 hides it locally; to remove it everywhere, drop it from `js/maps.js`.)
+
+**Modifiers:** the **Modifiers** panel toggles whether `Empowered` / `Gorn` /
+`Eira` are available on the map. Mark a monster **empowered** (×3) via its dot's
+edit dialog; use the per-group **G**/**E** toggles to mark groups removed under
+Gorn/Eira; and use **Place Gorn / Place Eira** to drop those monsters. All of it
+travels with **Export/Import map**.
 
 Use the rest of the page to manage monsters and place them without hand-editing
 coordinates:
